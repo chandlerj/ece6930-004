@@ -1,6 +1,9 @@
 import random
-from collections import defaultdict
+from collections import defaultdict, deque
 import numpy as np
+from tqdm import tqdm
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 random.seed(42)
 np.random.seed(42)
@@ -9,6 +12,9 @@ X, O, E = 'X', 'O', ' '  # players and empty
 
 def empty_board():
     return tuple([E]*9)  # immutable state
+
+def reset():
+    return empty_board()
 
 WIN_LINES = [
     (0,1,2),(3,4,5),(6,7,8),  # rows
@@ -28,6 +34,11 @@ def legal_actions(state):
     return [i for i,v in enumerate(state) if v == E]
 
 def place(state, idx, p):
+    """
+    state - state of the board. a list of 9 elements
+    idx   - idx of where to place p
+    p     - the player's designation (X or O)
+    """
     s = list(state)
     s[idx] = p
     return tuple(s)
@@ -38,6 +49,14 @@ def opponent_move(state):
     acts = legal_actions(state)
     if not acts: return state
     return place(state, random.choice(acts), O)
+
+def check_terminal(s1):
+    w = check_winner(s1)
+    if w == X:  return +1.0, True
+    if w == O:  return -1.0, True
+    if w == 'DRAW': return 0.0, True
+    else: return 0.0, False
+
 
 def step(state, action):
     """Agent X acts; environment responds with O's random move.
@@ -64,16 +83,123 @@ def random_policy(state):
 
 # ---------- Monte Carlo Policy Evaluation (First-Visit) ----------
 def generate_episode(policy):
-    # TODO: Make this work
-    pass
+    state = reset()
+
+    states = []
+    actions = []
+    done = False
+    reward = 0
+
+    while not done:
+        action = policy(state)
+
+        states.append(state)
+        actions.append(action)
+
+        state, reward, done = step(state, action)
+
+    return states, actions, reward
 
 def mc_first_visit_V(num_episodes=50000):
-    # TODO: Make this work
-    pass
+    returns = {}
+    V = {}
+    for episode in tqdm(range(num_episodes)):
+        states, _, reward = generate_episode(random_policy)
+        visited = []
+        for state in states:
+
+            if state in visited:
+                continue
+
+            visited.append(state)
+            if state not in returns:
+                returns[state] = []
+            returns[state].append(reward)
+            V[state] = sum(returns[state]) / len(returns[state])
+    return V
+
+def enumerate_reachable_X_states():
+    """
+    Returns a set of all boards (tuples) where it's X to move,
+    reachable from the empty board by legal alternating play.
+    """
+    X_states = set([empty_board()])
+    q = deque([empty_board()])
+
+    while q:
+        s = q.popleft()
+        _, done = check_terminal(s)
+        if done:
+            continue
+
+        # X moves
+        for a in legal_actions(s):
+            s1 = place(s, a, 'X')
+            _, done1= check_terminal(s1)
+            if done1:
+                continue  # terminal after X's move; no O reply
+
+            # O replies uniformly; enumerate all replies
+            for o in legal_actions(s1):
+                s2 = place(s1, o, 'O')  # back to X-to-move
+                # s2 is an X-to-move state
+                if s2 not in X_states:
+                    X_states.add(s2)
+                    q.append(s2)
+
+    return X_states
+
+def bellman_backup(state, V):
+    legal = legal_actions(state)
+    num_legal_actions = len(legal)
+
+    if not num_legal_actions:
+        winner = check_winner(state)
+        match winner:
+            case "X":
+                return 1
+            case "O":
+                return -1
+            case "DRAW":
+                return 0
+    v_new = 0
+    for action in legal:
+        s1 = place(state, action, 'X')
+        reward, done = check_terminal(s1)
+        
+        if done:
+            v_new += reward / num_legal_actions
+        else:
+            op_actions = legal_actions(s1)
+            num_op_actions = len(op_actions)
+            op_expectation = 0
+            for op_action in op_actions:
+                s2 = place(s1, op_action,'O')
+                op_reward, op_done = check_terminal(s2)
+                op_expectation = (op_reward if op_done else V[s2]) / num_op_actions
+            v_new += op_expectation / num_legal_actions
+    return v_new
+            
+def iterative_policy_eval(x_states, tol=1e-4):
+    V = {s: 0.0 for s in x_states}
+
+    while True:
+        delta = 0
+        for state in x_states:
+            done, reward = check_terminal(state)
+            v = reward if done else bellman_backup(state, V)
+            
+            delta = max(delta, abs(v - V[state]))
+
+            V[state] = v
+        if delta < tol:
+            break
+
+    return V
 
 # ---------- One-step Improvement using V ----------
 def greedy_one_step_with_V(state, V):
-    # TODO: This one too if you are a graduate student
+    # TODO: grad students do this one too
     pass
 
 def improved_policy(V):
@@ -96,16 +222,24 @@ def play_many(policy, n=10000):
     return wins/n, draws/n, losses/n
 
 if __name__ == "__main__":
-    print("Estimating V under random policy...")
-    V = mc_first_visit_V(50000)
+    # print("Estimating V under random policy...")
+    # V = mc_first_visit_V(50000)
+    # v_empty = V.get(empty_board(), 0.0)
+    # print("V_random(empty) ≈", round(v_empty, 4))
+
+    print("Estimating V under random policy (iterative policy evaluation)")
+    x_states = enumerate_reachable_X_states()
+    V = iterative_policy_eval(x_states)
     v_empty = V.get(empty_board(), 0.0)
     print("V_random(empty) ≈", round(v_empty, 4))
+    sns.histplot(V.values())
+    plt.show()
 
-    print("Evaluating random vs random:")
-    w,d,l = play_many(random_policy, 10000)
-    print(f"Random policy as X vs random O: win={w:.3f}, draw={d:.3f}, loss={l:.3f}")
+    # print("Evaluating random vs random:")
+    # w,d,l = play_many(random_policy, 10000)
+    # print(f"Random policy as X vs random O: win={w:.3f}, draw={d:.3f}, loss={l:.3f}")
 
-    pi1 = improved_policy(V)
-    print("Evaluating improved policy:")
-    w,d,l = play_many(pi1, 10000)
-    print(f"Improved policy as X vs random O: win={w:.3f}, draw={d:.3f}, loss={l:.3f}")
+    # pi1 = improved_policy(V)
+    # print("Evaluating improved policy:")
+    # w,d,l = play_many(pi1, 10000)
+    # print(f"Improved policy as X vs random O: win={w:.3f}, draw={d:.3f}, loss={l:.3f}")
