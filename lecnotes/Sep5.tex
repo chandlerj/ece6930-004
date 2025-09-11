@@ -1,0 +1,116 @@
+\documentclass[10pt]{article}
+\textheight=9.25in \textwidth=7in \topmargin=-.75in
+ \oddsidemargin=-0.25in
+\evensidemargin=-0.25in
+\usepackage{url}  % The bib file uses this
+\usepackage{graphicx} %to import pictures
+\usepackage{amsmath, amssymb, bbold}
+\usepackage{theorem, multicol, color}
+\usepackage{gfsartemisia-euler} % best font in da game
+\usepackage{tikz} % Graphs and other graphics
+
+\setlength{\intextsep}{5mm} \setlength{\textfloatsep}{5mm}
+\setlength{\floatsep}{5mm}
+\setlength{\parindent}{0em} % new paragraphs are not indented
+\setcounter{MaxMatrixCols}{20}
+\usepackage{caption}
+\captionsetup[figure]{font=small}
+
+
+%%%%  SHORTCUT COMMANDS  %%%%
+\newcommand{\ds}{\displaystyle}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\1}{\mathbb{1}}
+\newcommand{\arc}{\rightarrow}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\blank}{\underline{\hspace{0.33in}}}
+\newcommand{\qand}{\quad and \quad}
+\renewcommand{\stirling}[2]{\genfrac{\{}{\}}{0pt}{}{#1}{#2}}
+\newcommand{\dydx}{\ds \frac{d y}{d x}}
+\newcommand{\ddx}{\ds \frac{d}{d x}}
+\newcommand{\dvdx}{\ds \frac{d v}{d x}} 
+
+%%%%  footnote style %%%%
+
+\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{flushright}
+Chandler Justice - A02313187
+\end{flushright}
+\noindent \underline{\hspace{3in}}\\
+\textbf{ECE-6930-004} Lecture Notes \\
+\textbf{September 5, 2025}\\
+
+\section{Markov Decision Process}
+
+\textbf{Formulation}
+
+\begin{itemize}
+    \item \textit{States} $s$ - beginning with initial state $s_0$.
+    \item \textit{Actions} $a$ - each state $s$ has actions $A(s)$ available from it
+    \item \textit{Transition Model} $P(s' | s,a)$ - probability of moving to state $s'$ given the state-action pair $s, a$.
+\end{itemize}
+
+\section{The bellman equation}
+\[U(s) = R(s) + \gamma \underset{a \in A(s)}{\text{max}} \sum_{s'} P(s' | s,a) U(s')\]
+This gives us the optimal action given our current state. We can see this is recursive as it requires computing the utility of the state being considered $s'$. This allows us to make decisions which are optimal in an uncertain system. We do not have to have a perfect perception of the environment to determine our utilities.
+
+\subsection{Value vs Policy Iteration}
+
+\textit{value iteration}
+\begin{itemize}
+    \item state out with every $U(s) = 0$
+    \item iterate until convergence
+    \item at each iteration, update the value at the state using the bellman equation
+\end{itemize}
+
+\textit{policy iteration}
+\begin{itemize}
+    \item state with initial policy $\pi_0$ and alternate between policy evaluation and improvement. 
+    \item Evaluation involves calculating $U^{\pi_i}(s)$ for all states $s \in S$. 
+    \item Improvement involves calculating a new policy $\pi_{i + 1}$ based on the updated utilities.
+\end{itemize}
+This mutates our utility function to
+\[U^{\pi}(s) = R(s) + \gamma \sum_{s'} P(s' | s,\pi(s)) U^{\pi}(s')\]
+Where $\pi(s)$ is fixed; therefore, $P(s' | s, \pi(s))$ is an $s' \times s$ matrix, therefore we can solve a linear equation to get $U^{\pi}(s)$.\\
+
+This lets us evaluate the utility of the current policy. The next step is to use this further mutation
+
+
+\[U^{\pi}(s) = \underset{a \in A(s)}{\text{argmax}}\sum_{s'} P(s' | s,a) U^{\pi}(s')\]
+
+This allows us to improve our policy based on the optimal action given our current state and possible future statues.\\
+
+\textbf{September 8, 2025}\\
+
+\section{On TicTacToe}
+
+In 1962, the first Tic Tac Toe simulation created and performed by hand by Donald Michie. We could just pull data from human moves, but a human may be a weak player or not represent the desired player.\\
+
+\textbf{Donald Michie's Machine (MENACE)}
+\begin{itemize}
+    \item for each board state where cross is on-move, have a "match box"labeled with that state. Each match box has a number of colored beads in it, each color represents a valid move for cross on that board.
+    \item To make a move, pick up box with label of current state, shake it, pick random bead. Check color and make that move
+    \item new state, wait for human counter move. Repeat until terminating condition.
+    \item If MENACE loses, remove any beads used in sequence. If MENACE wins, add three extra copies of each bead used in that game to the appropriate match boxes. In a draw, add one extra set of beads.
+\end{itemize}
+
+\textit{This is somewhat analogous to modern Q-learning.}\\
+
+
+\textbf{September 10, 2025}\\
+
+
+
+\noindent \underline{\hspace{3in}}\\
+
+\end{document}
+

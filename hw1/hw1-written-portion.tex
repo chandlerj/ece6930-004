@@ -1,0 +1,75 @@
+\documentclass[10pt]{article}
+\textheight=9.25in \textwidth=7in \topmargin=-.75in
+ \oddsidemargin=-0.25in
+\evensidemargin=-0.25in
+\usepackage{url}  % The bib file uses this
+\usepackage{graphicx} %to import pictures
+\usepackage{amsmath, amssymb, bbold}
+\usepackage{theorem, multicol, color}
+\usepackage{gfsartemisia-euler} % best font in da game
+\usepackage{tikz} % Graphs and other graphics
+
+\setlength{\intextsep}{5mm} \setlength{\textfloatsep}{5mm}
+\setlength{\floatsep}{5mm}
+\setlength{\parindent}{0em} % new paragraphs are not indented
+\setcounter{MaxMatrixCols}{20}
+\usepackage{caption}
+\captionsetup[figure]{font=small}
+
+
+%%%%  SHORTCUT COMMANDS  %%%%
+\newcommand{\ds}{\displaystyle}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\1}{\mathbb{1}}
+\newcommand{\arc}{\rightarrow}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\blank}{\underline{\hspace{0.33in}}}
+\newcommand{\qand}{\quad and \quad}
+\renewcommand{\stirling}[2]{\genfrac{\{}{\}}{0pt}{}{#1}{#2}}
+\newcommand{\dydx}{\ds \frac{d y}{d x}}
+\newcommand{\ddx}{\ds \frac{d}{d x}}
+\newcommand{\dvdx}{\ds \frac{d v}{d x}} 
+
+%%%%  footnote style %%%%
+
+\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{flushright}
+Chandler Justice - A02313187
+\end{flushright}
+\noindent \underline{\hspace{3in}}\\
+\textbf{ECE-5930-004} Homework \#1 \\
+\textbf{Due:} September 17, 2025 @ 23:59\\
+
+Define the following elements of the Marcov space for this assignment:\\
+
+$S$: This is the state of the game. Since we are playing rock paper scissors we want to represent a $3 \times 3$ array wherein each element can be occupied by either an $X$ or $O$ mark, or an empty string. Each player uses either $X$ or $O$ to mark their positions on the board, meaning the empty string represents a position where neither player has placed a mark. For simplicity of implementation, we will flatten the array to a 9 element 1D array. This will not effect the functionality of the agent or the game board.\\
+
+$A$: Each player must mark a position on the board at every timestep, and marks can only be placed where a mark does not already exist. This means each agent has the action space of placing their respective mark on an empty position on the board.\\
+
+$P(s'|s,a):$ Probability of transitioning from one game board to the next. For us, this can be thought of as a tree wherein each branch is a subsequent board state, and is associated with some probability of entering that state from the current node. Terminating nodes of the tree represent one of the players winning or a draw. While the opponent is playing randomly, our state transitions can still use this structure. The nodes where the random opponent plays will have a probability distribution characteristic of their random behavior.\\
+
+$R(s, a, s'):$ Rewards will be given only at the end of every game and are determined by if the agent wins, loses, or draws. This means $s'$ should be \texttt{none} as the reward is always evaluated at the terminal state. The reward function is defined as
+
+\[R(s, a, s') = \begin{cases}
+    1 & \text{winning terminal state}\\
+    -1 & \text{losing terminal state}\\
+    0 & \text{otherwise}
+\end{cases}\]
+
+Other Details: The past decisions are not discounted, meaning $\gamma = 1$. For our agent, this means past decisions are just as important as present decisions. Since we only evaluate reward at the end of the game considering the whole game as equally important seems like the right move. Additionally, a tic tac toe game will only last at most 9 moves further negating the need to discount past moves.\\
+
+An episode in our environment is defined to have an initial state of an empty board, and a terminal state such that a player wins or a draw is reached. Due to the definition of the environment, the environment has the Marcov property and is the agent-environment pairing can be formulated as a Marcov decision process.
+
+\noindent \underline{\hspace{3in}}\\
+
+\end{document}
+
