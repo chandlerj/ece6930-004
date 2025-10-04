@@ -30,7 +30,7 @@ Chandler Justice - A02313187
     \item What is the difference between on-policy and off-policy algorithms?         
         \begin{enumerate}
             \item On-policy algorithms use a single policy for both acting and learning, while off-policy algorithms use a target policy for acting and a behavioral policy for learning from rewards. (Correct)\\
-                \textit{The correct policy approach depends on the application, but a primary advantage of an off-policy is the ability to decouple learning the optimal policy from the policy currently being acted on. In our first homework, we learned a policy from observing a random actor, but by observing this actor we were able to create a policy that when deployed as the actor was much more proficient at the task. Off-policy learning also has the advantage of not being as susceptible to converging into a local minima. In some applications it may make more sense to use an on-policy technique, such as training a robot to walk on real hardware.}
+                \textit{The correct policy approach depends on the application, but a primary advantage of an off-policy is the ability to decouple learning the optimal policy from the policy currently being acted on. In our first homework, we learned a policy from observing a random actor, but by observing this actor we were able to create a policy that when deployed as the actor was much more proficient at the task. Off-policy learning also has the advantage of not being as susceptible to converging into a local minima as the behavior can differ from the greedy policy target. In some applications it may make more sense to use an on-policy technique, such as training a robot to walk using real hardware.}
             \item On-policy algorithms use deterministic policies while off-policy algorithms use stochastic polices.
             \item On-policy algorithms choose the best action without any exploration. Off-policy algorithms chooses the best action with exploration.
             \item On-policy algorithms uses models to learn while off-policy algorithms don't.
@@ -55,7 +55,7 @@ Chandler Justice - A02313187
     \item In DQN, what is the role of the replay buffer?
         \begin{enumerate}
             \item To break correlation by randomly sampling from the agent's past experiences stored in the buffer. (Correct)\\
-            \textit{This prevents the agent from falling into a local minima. If an agent falls into a certain traversal path through the state this can result in a sub-optimal policy. Using the replay buffer can diminish this effect as it adjusts the policy with regards to the experiences sampled. Additionally, this can result in faster convergence as the past experiences are reinforced multiple times over meaning less samples are needed overall.}
+            \textit{The replay buffer stores experiences $(s, a, r, s')$ and allows random sampling during training. A key advantage of the replay buffer is it prevents the agent from falling into a local minima. If an agent falls into a certain traversal path through greedy traversal of states this can result in a sub-optimal policy. Using the replay buffer can diminish this effect as it adjusts the policy with regards to the experiences sampled. Additionally, this can result in faster convergence as the past experiences are reinforced multiple times over meaning less samples are needed overall.}
             \item The time it takes for an agent to analyze what the best action would be in a state
             \item Used to store only high-reward actions
             \item Computes the reward signal for each action
@@ -63,7 +63,13 @@ Chandler Justice - A02313187
     \item With a Q-Learning, how can we guarantee that we will converge on an optimal solution (assuming a proper decaying step-sized is used)?
         \begin{enumerate}
             \item As long as every state-action pair is continually updated then you will converge. (Correct)\\
-                \textit{}
+                \textit{Analytical proofs for this claim are not provided in the textbook; however, there are many properties which Q-learning possess which imply convergence under specific conditions. Specifically}
+            \begin{itemize}
+                \item \textit{Every state-action pair is visited infinitely often (in implementation this means enough for 'sufficient' exploration)}
+                \item \textit{Q-Learning is an off-policy TD control method}
+                \item \textit{Q-Learning is applied to an environment with finite states and actions. (Note: most proofs make this assumption, but some literature has shown that Q-learning can converge in continuous cases)}
+                \item \textit{Rewards are bounded ($r_t \neq \infty$ as $t \to \infty$)}
+            \end{itemize}
             \item Always choosing the action that yields the highest reward will guarantee convergence.
             \item Setting $\gamma = 1$ will cause convergence.
             \item The Q-values should always be increasing to cause convergence.
@@ -75,35 +81,28 @@ Chandler Justice - A02313187
 \begin{enumerate}
     \item Explain how the Action-Value Function works. Write the Bellman equation and explain each component.
     
-    \textbf{Solution:} The bellman equation states
-    \[q_{*} = \sum_{s', r} p(s', r| s, a) \left[r + \gamma \underset{a'}{\text{max }} q_{*}(s',a')\right] \]
+        \textbf{Solution:} The bellman \textit{expectation} equation states
+    \begin{align*}
+        q(s,a) &= \mathbb{E}_{\pi} \left[G_t | S_t = s, A_t = a \right]\\
+               &= \sum_{s', r} p(s', r| s, a) \left[r + \gamma \sum_{a'} \pi(a'|s') q_{\pi}(s',a')\right]
+    \end{align*}
+    Lets go through what each component of this equation is doing:
+    \begin{itemize}
+        \item $p(s', r| s, a)$: This gives us the probability of getting a reward in a future state $s'$ from our current state. When we take the sum of all of these values they will add up to 1, meaning we are exploring all possible future states
+        \item $\left[r + \gamma \sum_{a'} \pi(a'|s') q_{\pi}(s',a')\right]$: This gives us the expected future value given all possible future actions and states, and our current policy. 
+    \end{itemize}
+    
+    The allows us to get a long-horizon outlook on the quality of a state action pair. When we are picking an action, there may be a choice which looks optimal from a greedy perspective, but which actually only leads to a locally optimal solution, meaning we converge to a sub-optimal policy. By evaluating the long-term quality of a state-action pair, we can pick an action which immediately gives a lower reward, but in the long term will result in a higher value overall.
 
-    \item How does the Q-Table relate to the Action-Value function in Question 1?
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \item How does DQN differ from Q-Learning? What are some improvements that DQN brings?
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
-    \\
+    \item How does the Q-Table relate to the Action-Value function in Question 1?\\
+        \textbf{Solution:} The Q-Table relates a given state and action and provides the expected cumulative discounted return given the pair. The entries in the Q-table are updated with
+        \[Q(s,a) \leftarrow Q(s,a) + \alpha \left[r + \gamma \underset{a'}{\text{max}}Q(s',a') - Q(s,a) \right]\]
+        When an action and reward is visited, the entry in the Q-Table is updated to reflect the reward obtained, plus the estimated value of taking optimal future values. As time increases, the Q-table will converge towards the true action-value function. This provides a significant computational advantage over directly computing the action-value function.
+        
+    \item How does DQN differ from Q-Learning? What are some improvements that DQN brings?\\
+        \textbf{Solution:} DQN utilizes a neural network instead of using a Q-table. This allows for utilizing the same principals of Q-learning without having to keep a tabulation of all possible key-value pairs, which in turn means this learning technique can be applied to much larger environments. Additionally, DQN provides a replay buffer which randomly samples the environment allowing for faster convergence to an optimal policy alongside breaking up breaking up correlations which can arise when following sequential state-action pairs.\\
+
+        Another key distinction is the target network which provides additional stability through less frequent updates versus the main Q-network. These less frequent updates stabilize training which can arise from the constant change in target values.
 \end{enumerate}
 \newpage
 \section{Q-Table by Hand}
@@ -152,10 +151,10 @@ We have provided for you what you should get on the second iteration:
 \begin{tabular}{c|c|c|c|c}
 \textbf{State} & \textbf{Up} & \textbf{Down} & \textbf{Left} & \textbf{Right} \\
 \hline
-S$_0$ & 0 & 0 & 0 & 0 \\
-S$_1$ & 0 & -0.75 & 0.25 & 0 \\
-S$_2$ & 0 & 0.75 & 0 & 0.125 \\
-S$_3$ & 0 & 0 & -0.75 & 0 \\
+S$_0$ & 0      & 0     & 0     & 0 \\
+S$_1$ & 0      & -0.75 & 0     & 0.25 \\
+S$_2$ & 0      & 0.75  & 0.125 & 0 \\
+S$_3$ & 0      & 0     & 0     & -0.75 \\
 \end{tabular}
 \caption{Iteration 2}
 \end{table}
