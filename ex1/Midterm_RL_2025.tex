@@ -7,6 +7,7 @@
 \usepackage{gfsartemisia-euler} % best font in da game
 \usepackage{float}
 \usepackage{tikz}
+\usepackage{parskip}
 
 \title{Midterm Exam}
 \author{ECE 5/6930 - 004}
@@ -159,6 +160,78 @@ S$_3$ & 0      & 0     & 0     & -0.75 \\
 \caption{Iteration 2}
 \end{table}
 
+
+\textbf{Solution:} This was painful to compute by hand.\\
+
+\textbf{Iteration 1}\\
+
+% Iteration 1
+\begin{tabular}{lrrrr}
+\hline
+State & Up & Down & Left & Right \\
+\hline
+S0 & 0 & 0 & 0 & 0 \\
+S1 & 0 & -0.5 & 0 & 0 \\
+S2 & 0 & 0.5 & 0 & 0 \\
+S3 & 0 & 0 & 0 & -0.5 \\
+\hline
+\end{tabular}\\
+
+\textbf{Iteration 2}\\
+
+% Iteration 2
+\begin{tabular}{lrrrr}
+\hline
+State & Up & Down & Left & Right \\
+\hline
+S0 & 0 & 0 & 0 & 0 \\
+S1 & 0 & -0.75 & 0 & 0.25 \\
+S2 & 0 & 0.75 & 0.125 & 0 \\
+S3 & 0 & 0 & 0 & -0.75 \\
+\hline
+\end{tabular}
+
+\textbf{Iteration 3}\\
+
+% Iteration 3
+\begin{tabular}{lrrrr}
+\hline
+State & Up & Down & Left & Right \\
+\hline
+S0 & 0 & 0 & 0 & 0.125 \\
+S1 & 0 & -0.875 & 0.0625 & 0.5 \\
+S2 & 0 & 0.875 & 0.3125 & 0 \\
+S3 & 0.0625 & 0 & 0 & -0.875 \\
+\hline
+\end{tabular}\\
+
+\textbf{Iteration 4}\\
+
+\begin{tabular}{lrrrr}
+\hline
+State & Up & Down & Left & Right \\
+\hline
+S0 & 0 & 0.03125 & 0 & 0.3125 \\
+S1 & 0 & -0.9375 & 0.1875 & 0.6875 \\
+S2 & 0 & 0.9375 & 0.5 & 0 \\
+S3 & 0.1875 & 0 & 0 & -0.9375 \\
+\hline
+\end{tabular}\\
+
+\textbf{Iteration 5}\\
+
+\begin{tabular}{lrrrr}
+\hline
+State & Up & Down & Left & Right \\
+\hline
+S0 & 0 & 0.109375 & 0 & 0.5 \\
+S1 & 0 & -0.96875 & 0.34375 & 0.8125 \\
+S2 & 0 & 0.96875 & 0.65625 & 0 \\
+S3 & 0.34375 & 0 & 0 & -0.96875 \\
+\hline
+\end{tabular}\\
+
+
 \section{Graduate Students: Probabilistic Q-Table by Hand}
 
 Please add two complexities to this problem:
@@ -170,6 +243,180 @@ Please add two complexities to this problem:
 
 You are welcome to either take the expectations/probabilities directly or emulate with a random number.
 
-Compare the above with a situation where you have an action cost (for each action taken) of $-0.25$, and comment on the changes in the Q table?
+Compare the above with a situation where you have an action cost (for each action taken) of $-0.25$, and comment on the changes in the Q table?\\
+
+\textbf{Solution:} Let's do this with a program.\footnote{I am not very proud of this program. I think it is written poorly. If I was using this for longer than an exam I would rewrite it.} We will use \texttt{python} to make life easy. I wrote the following implementation of the above requirements:
+
+\begin{verbatim}
+import random
+
+ALPHA = 0.5
+
+A={'S0':['Up', 'Down', 'Left', 'Right'],
+   'S1':['Up', 'Down', 'Left', 'Right'],
+   'S2':['Up', 'Down', 'Left', 'Right'],
+   'S3':['Up', 'Down', 'Left', 'Right'],}
+
+Q={s:{a:0.0 for a in A[s]} for s in ['S0','S1','S2','S3']}
+
+rewards = { 
+           'S0':    0,
+           'S1':    0,
+           'S2':    0,
+           'S3':    0,
+           'Bomb': -1,
+           'Goal':  1,
+          }
+
+inbound_transitions = {
+    ('S0', 'Right'): ['S1', 0],
+    ('S0', 'Down'):  ['S3', 0],
+    ('S1', 'Down'):  ['Bomb', -1],
+    ('S1', 'Right'): ['S2', 0],
+    ('S1', 'Left'):  ['S0', 0],
+    ('S2', 'Down'):  ['Goal', 1],
+    ('S2', 'Left'):  ['S1', 0],
+    ('S3', 'Right'): ['Bomb', -1],
+    ('S3', 'Up'):    ['S0', 0]
+}
+
+def wall_hit(s, teleport=False):
+    if teleport:
+        new_cell = random.choice(list(rewards.keys()))
+        return new_cell, rewards[new_cell]
+    else:
+        return s, 0
+
+
+def step(state, action, teleport=False):
+    if (state, action) in inbound_transitions:
+        sprime, r = inbound_transitions[(state, action)]
+        return sprime, r
+
+    return wall_hit(state, teleport)
+
+
+def maxQ(s):
+    if s in ('Bomb','Goal'):
+        return 0.0
+    return max(Q[s].values())
+
+def update(s, a, teleport=False, random_action=False, random_p=0.2):
+    if random_action:
+        coin = 1 if random.random() < random_p else 0
+        if coin:
+            a = random.choice(['Up', 'Down', 'Left', 'Right'])
+
+    sprime, r = step(s,a, teleport)
+    if sprime == s and not teleport:
+        return # we are trying to transition into a wall
+    target = r + (0 if sprime in ('Bomb','Goal') else maxQ(sprime))
+    Q[s][a] = Q[s][a] + ALPHA * (target - Q[s][a])
+
+def print_Q(Q):
+    for state, values in Q.items():
+        print(state, end='\t')
+        for value in values.values():
+            print(f'{value:8.5f}', end=' ')
+        print()
+
+if __name__ == "__main__":
+    random.seed(42)
+    ITERATIONS = 5
+    TELEPORT = True
+    RANDOM_MOTION = True
+    for iter in range(ITERATIONS):
+        for s in A.keys():
+            for a in A[s]:
+                update(s,a, TELEPORT, RANDOM_MOTION)
+        print(f"Q-table at iteration {iter}")
+        print_Q(Q)
+\end{verbatim}
+
+This program lets us toggle our new features (so I can verify the previous part is correct), and it lets us adjust the number of iterations. Let's try this for 10 iterations and see if we converge to an optimal policy:
+
+\begin{verbatim}
+Q-table at iteration 0
+S0	 0.00000  0.00000  0.00000  0.00000
+S1	-0.25000  0.00000  0.00000  0.00000
+S2	-0.50000  0.00000  0.00000  0.00000
+S3	 0.00000  0.00000  0.00000 -0.75000
+Q-table at iteration 1
+S0	 0.00000  0.00000 -0.50000  0.00000
+S1	-0.25000 -0.50000  0.00000  0.00000
+S2	 0.25000  0.50000  0.00000  0.50000
+S3	 0.00000  0.12500  0.06250 -0.87500
+Q-table at iteration 2
+S0	 0.25000  0.00000  0.37500  0.00000
+S1	-0.62500 -0.75000  0.18750  0.25000
+S2	 0.37500  0.75000  0.12500  0.75000
+S3	 0.18750  0.25000  0.21875 -0.93750
+... Middle skipped for brevity ...
+Q-table at iteration 8
+S0	 0.71008  0.73145  0.65210  0.77441
+S1	 0.19531 -0.99902  0.72314  0.98486
+S2	 0.81934  0.99609  0.93433  0.77295
+S3	 0.74097  0.30127  0.95044 -0.99951
+Q-table at iteration 9
+S0	 0.89035  0.84094  0.65210  0.87964
+S1	 0.57288 -0.99951  0.80675  0.99048
+S2	 0.90967  0.99805  0.96240  0.83165
+S3	 0.81566  0.65063  0.92039 -0.99976
+\end{verbatim}
+
+I'm not sure if this counts as \textit{long-run}, but at 100 iterations (which for this small of a problem I would argue is \textit{long-run}) the Q-table looks like:
+
+\begin{verbatim}
+Q-table at iteration 99
+S0	 0.74307  1.00000  0.99988  1.00000
+S1	-0.06836 -1.00000  1.00000  1.00000
+S2	 0.98822  1.00000  1.00000  0.68744
+S3	 1.00000  0.99984  0.99902 -1.00000
+\end{verbatim}
+
+Which means we converge to a policy of "move basically anywhere except towards the bomb".\\
+
+We can adjust our \texttt{rewards} and \texttt{inbound\_transitions} variables to induce a penalty of -0.25 for all steps (including terminal steps, meaning goal=0.75 and bomb=-1.25) to complete the second part of the question. Let's look at the same iteration points of this version as the previous simulation:
+
+\begin{verbatim}
+Q-table at iteration 0
+S0	-0.12500 -0.12500 -0.12500 -0.12500 
+S1	-0.43750  0.00000  0.00000 -0.18750 
+S2	-0.62500  0.00000 -0.12500 -0.25000 
+S3	-0.18750  0.00000 -0.12500 -0.93750 
+Q-table at iteration 1
+S0	-0.25000 -0.12500 -0.68750 -0.18750 
+S1	-0.43750 -0.62500 -0.18750 -0.23438 
+S2	 0.06250  0.37500 -0.28125  0.25000 
+S3	-0.18750 -0.18750 -0.25000 -1.09375 
+Q-table at iteration 2
+S0	-0.06250 -0.12500  0.09375 -0.31250 
+S1	-0.84375 -0.93750 -0.17188 -0.05469 
+S2	 0.09375  0.56250 -0.29297  0.50000 
+S3	-0.17188 -0.17188 -0.20312 -1.17188 
+... Middle skipped for brevity ...
+Q-table at iteration 8
+S0	 0.14789 -0.04608  0.06905  0.08307 
+S1	-0.22656 -1.24878 -0.09531  0.48868 
+S2	 0.21750  0.74707  0.20134  0.03784 
+S3	-0.17374 -0.33035  0.29564 -1.24939 
+Q-table at iteration 9
+S0	 0.07120 -0.00022  0.06905  0.16087 
+S1	-0.09046 -1.24939 -0.09222  0.49287 
+S2	 0.48375  0.74854  0.22211 -0.02564 
+S3	-0.13144  0.20982  0.10326 -1.24969 
+... Middle skipped for brevity ...
+Q-table at iteration 99
+S0	 0.20468  0.13250  0.72686  0.25000 
+S1	-0.52628 -1.25000  0.45056  0.50000 
+S2	 0.53019  0.75000  0.25000  0.26930 
+S3	 0.40372  0.51069  0.49169 -1.25000 
+\end{verbatim}
+
+The action penalty is clearly described by this new Q-table. We can see that movements which are closer to the goal are closer to the maximum reward of 0.75, while movements which would create more future steps are further from the goal. Additionally, the new lower bound for reward -1.25 can be seen in some state-action pairs.\\
+
+\begin{center}
+    FIN,
+\end{center}
 
 \end{document}
