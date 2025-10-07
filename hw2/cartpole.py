@@ -1,17 +1,56 @@
-import gymnasium as gym
-import math
-import random
-import matplotlib
-import matplotlib.pyplot as plt
 from collections import namedtuple, deque
 from itertools import count
+import math
+import random
+import time
 
+import gymnasium as gym
+import matplotlib
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torchrl.data import ReplayBuffer, ListStorage
+from torchrl.data.replay_buffers.samplers import PrioritizedSampler
 
-import time
+#----------------------------------------------------------------ENVIRONMENT PARAMETERS
+
+# BATCH_SIZE is the number of transitions sampled from the replay buffer
+# GAMMA is the discount factor as mentioned in the previous section
+# EPS_START is the starting value of epsilon
+# EPS_END is the final value of epsilon
+# EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
+# TAU is the update rate of the target network
+# LR is the learning rate of the ``AdamW`` optimizer
+
+BATCH_SIZE = 128
+GAMMA = 0.99
+EPS_START = 0.9
+EPS_END = 0.01
+EPS_DECAY = 2500
+TAU = 0.005
+LR = 3e-4
+
+# PER Hyperparams
+PER_ALPHA = 0.6
+PER_BETA0 = 0.4
+PER_EPS = 1e-5
+
+
+USE_PRIORITY_BUFFER=True
+
+#----------------------------------------------------------------PLOT BUFFERS
+
+dqn_rewards = []
+ddqn_rewards = []
+dqn_episode_durations = []
+ddqn_episode_durations = []
+
+#----------------------------------------------------------------GLOBALS (sorry)
+
+steps_done = 0
+per_beta = PER_BETA0
 
 #----------------------------------------------------------------ENVIRONMENT SETUP
 
@@ -30,16 +69,12 @@ device = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
-
-
 # To ensure reproducibility during training, you can fix the random seeds
 # by uncommenting the lines below. This makes the results consistent across
 # runs, which is helpful for debugging or comparing different approaches.
 #
 # That said, allowing randomness can be beneficial in practice, as it lets
 # the model explore different training trajectories.
-
-
 seed = 42
 random.seed(seed)
 torch.manual_seed(seed)
@@ -54,6 +89,9 @@ if torch.cuda.is_available():
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
+
+TD_Transition = namedtuple('Transition', 
+                           ('state', 'action', 'next_state', 'reward', 'done'))
 
 
 class ReplayMemory(object):
@@ -93,6 +131,18 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
+
+if USE_PRIORITY_BUFFER:
+    memory = ReplayBuffer(
+            storage=ListStorage(10000),
+            sampler=PrioritizedSampler(max_capacity=10000, alpha=PER_ALPHA, beta=PER_BETA0),
+            collate_fn=lambda x: x,)
+    
+else:
+    # The ReplayMemory will hold 10_000 previous experiences (steps)
+    memory = ReplayMemory(10000)
+ 
+
 class DQN(nn.Module):
     """
     DQN inherits the nn.Module class, allowing
@@ -118,8 +168,8 @@ class DQN(nn.Module):
         with a ReLU activation function
 
           6       /
-                 /
-          0 -----
+                 / 
+          0 -----  
             0     6
         fig: ReLU in ASCII
         """
@@ -128,49 +178,6 @@ class DQN(nn.Module):
         return self.layer3(x)
 
 
-
-# BATCH_SIZE is the number of transitions sampled from the replay buffer
-# GAMMA is the discount factor as mentioned in the previous section
-# EPS_START is the starting value of epsilon
-# EPS_END is the final value of epsilon
-# EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
-# TAU is the update rate of the target network
-# LR is the learning rate of the ``AdamW`` optimizer
-
-BATCH_SIZE = 128
-GAMMA = 0.99
-EPS_START = 0.9
-EPS_END = 0.01
-EPS_DECAY = 2500
-TAU = 0.005
-LR = 3e-4
-
-
-# Get number of actions from gym action space
-n_actions = env.action_space.n
-# Get the number of state observations
-state, info = env.reset()
-n_observations = len(state)
-
-# this the policy being used to perform actions
-policy_net = DQN(n_observations, n_actions).to(device)
-# this is a copy of the policy net which will be updated
-# at less frequent rates to increase stability of training
-target_net = DQN(n_observations, n_actions).to(device)
-target_net.load_state_dict(policy_net.state_dict())
-
-# this sets up the AdamW optimizer, which adapts the learning
-# rate for each parameter as the model is trained. This is done
-# applying 'weight decay' to the loss function which improves
-# the generalization of the trained model. This causes the weights
-# to converge to 0 producing a simpler (and more generalized) model.
-optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
-
-# The ReplayMemory will hold 10_000 previous experiences (steps)
-memory = ReplayMemory(10000)
-
-
-steps_done = 0
 
 
 def select_action(state):
@@ -184,6 +191,7 @@ def select_action(state):
     random sampling increases.
     """
     global steps_done
+
     sample = random.random()
 
     # this decays the probability of selecting a random action as
@@ -200,10 +208,6 @@ def select_action(state):
             return policy_net(state).max(1).indices.view(1, 1)
     else:
         return torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.long)
-
-
-dqn_episode_durations = []
-ddqn_episode_durations = []
 
 
 def plot_durations(show_result=False):
@@ -233,10 +237,21 @@ def plot_durations(show_result=False):
         else:
             display.display(plt.gcf())
 
+
 def optimize_model(ddqn=False):
+
+    global per_beta
+    global memory
+
     if len(memory) < BATCH_SIZE:
         return
-    transitions = memory.sample(BATCH_SIZE)
+
+    if USE_PRIORITY_BUFFER:
+        transitions, info = memory.sample(BATCH_SIZE, return_info=True)
+        probs, index = info.values()
+        index.reshape(-1)
+    else:
+        transitions = memory.sample(BATCH_SIZE)
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
@@ -249,13 +264,13 @@ def optimize_model(ddqn=False):
     non_final_next_states = torch.cat([s for s in batch.next_state
                                                 if s is not None])
     state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
+    action_batch = torch.cat(batch.action).long().view(-1,1)
     reward_batch = torch.cat(batch.reward)
 
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # columns of actions taken. These are the actions which would've been taken
     # for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
+    state_action_values = policy_net(state_batch).gather(1, action_batch).squeeze(1)
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based
@@ -266,7 +281,7 @@ def optimize_model(ddqn=False):
     with torch.no_grad():
         if ddqn:
             # find actions which the policy network considers optimal
-            optimal_actions = policy_net(non_final_next_states).max(1).indices.unsqueeze(1)
+            optimal_actions = policy_net(non_final_next_states).max(1).indices.long().unsqueeze(1)
             # access their value using the target net and feed that as the next state values
             target_q_vals = target_net(non_final_next_states).gather(1, optimal_actions).squeeze(1)
             next_state_values[non_final_mask] = target_q_vals
@@ -274,20 +289,34 @@ def optimize_model(ddqn=False):
             next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+    
+    td_error = (expected_state_action_values - state_action_values).detach()
 
     # Compute Huber loss
-    criterion = nn.SmoothL1Loss()
-    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+    criterion = nn.SmoothL1Loss(reduction="none")
+    loss = criterion(state_action_values, expected_state_action_values).mean()
 
-    # Optimize the model
+
+    if USE_PRIORITY_BUFFER:
+        probs_tensor = torch.as_tensor(probs, dtype=torch.float32, device=device)
+        N = len(memory)
+        per_beta = min(1.0, per_beta + 1e-5)
+        importance_sampling = (N * probs_tensor).clamp_min(1e-12).pow(-per_beta)
+        importance_sampling = importance_sampling / importance_sampling.max().clamp_min(1e-12)
+        loss = (importance_sampling * loss).mean()
+
+        # Optimize the model
     optimizer.zero_grad()
     loss.backward()
     # In-place gradient clipping
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
 
-dqn_rewards = []
-ddqn_rewards = []
+    if USE_PRIORITY_BUFFER:
+        new_prios = (td_error.abs() + PER_EPS).pow(PER_ALPHA)
+        memory.update_priority(index.reshape(-1), new_prios.reshape(-1))
+
+
 def plot_rewards(show_result=False):
     plt.figure(2)
     dqn_plot = torch.tensor(dqn_rewards, dtype=torch.float)
@@ -315,62 +344,30 @@ def plot_rewards(show_result=False):
         else:
             display.display(plt.gcf())
 
+def train(title_name="DQN", ddqn=False):
+    global steps_done 
+    global memory
+    global env
+
+
+
+
 #----------------------------------------------------------------TRAINING LOOP
+
 
 if torch.cuda.is_available() or torch.backends.mps.is_available():
     num_episodes = 600
 else:
     num_episodes = 50
 
-start_time = time.time()
-print("DQN RUN")
-for i_episode in range(num_episodes):
-    # Initialize the environment and get its state
-    state, info = env.reset()
-    state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-    ep_reward = 0
-    for t in count():
-        action = select_action(state)
-        observation, reward, terminated, truncated, _ = env.step(action.item())
-        ep_reward += reward
-        reward = torch.tensor([reward], device=device)
-        done = terminated or truncated
 
-        if terminated:
-            next_state = None
-        else:
-            next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
+#----------------------------------------------------------------DDQN RUN - RESETTING ENVIRONMENT
+steps_done=0
 
-        # Store the transition in memory
-        memory.push(state, action, next_state, reward)
 
-        # Move to the next state
-        state = next_state
-
-        # Perform one step of the optimization (on the policy network)
-        optimize_model()
-
-        # Soft update of the target network's weights
-        # θ′ ← τ θ + (1 −τ )θ′
-        target_net_state_dict = target_net.state_dict()
-        policy_net_state_dict = policy_net.state_dict()
-        for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-        target_net.load_state_dict(target_net_state_dict)
-
-        if done:
-            dqn_episode_durations.append(t + 1)
-            dqn_rewards.append(ep_reward)
-            plot_durations()
-            plot_rewards()
-            break
-end_time = time.time()
-
-total_time = end_time - start_time
-print(f'Complete in {total_time} seconds')
-print("RESETTING MEMORY")
-memory.clear()
-
+per_beta = PER_BETA0
+# Get number of actions from gym action space
+n_actions = env.action_space.n
 # Get the number of state observations
 state, info = env.reset()
 n_observations = len(state)
@@ -389,11 +386,11 @@ target_net.load_state_dict(policy_net.state_dict())
 # to converge to 0 producing a simpler (and more generalized) model.
 optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
 
-# The ReplayMemory will hold 10_000 previous experiences (steps)
-memory = ReplayMemory(10000)
 
-print("DDQN RUN")
+
+
 start_time = time.time()
+print(f"DQN RUN")
 for i_episode in range(num_episodes):
     # Initialize the environment and get its state
     state, info = env.reset()
@@ -411,14 +408,17 @@ for i_episode in range(num_episodes):
         else:
             next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
 
-        # Store the transition in memory
-        memory.push(state, action, next_state, reward)
+        if USE_PRIORITY_BUFFER:
+            indicies = memory.extend([(state, action, next_state, reward)])
+        else:
+            # Store the transition in memory
+            memory.push(state, action, next_state, reward)
 
         # Move to the next state
         state = next_state
 
         # Perform one step of the optimization (on the policy network)
-        optimize_model(ddqn=True)
+        optimize_model()
 
         # Soft update of the target network's weights
         # θ′ ← τ θ + (1 −τ )θ′
@@ -429,17 +429,105 @@ for i_episode in range(num_episodes):
         target_net.load_state_dict(target_net_state_dict)
 
         if done:
-            ddqn_episode_durations.append(t + 1)
-            ddqn_rewards.append(ep_reward)
-            plot_durations()
+            dqn_rewards.append(ep_reward)
             plot_rewards()
             break
 end_time = time.time()
-
 total_time = end_time - start_time
 print(f'Complete in {total_time} seconds')
 
+env.close()
+
+
+env = gym.make("CartPole-v1", render_mode='rgb_array')
+env.reset(seed=seed)
+env.action_space.seed(seed)
+env.observation_space.seed(seed)
+random.seed(seed)
+torch.manual_seed(seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(seed)
+
+steps_done=0
+
+
+per_beta = PER_BETA0
+# Get number of actions from gym action space
+n_actions = env.action_space.n
+# Get the number of state observations
+state, info = env.reset()
+n_observations = len(state)
+
+# this the policy being used to perform actions
+policy_net = DQN(n_observations, n_actions).to(device)
+# this is a copy of the policy net which will be updated
+# at less frequent rates to increase stability of training
+target_net = DQN(n_observations, n_actions).to(device)
+target_net.load_state_dict(policy_net.state_dict())
+
+# this sets up the AdamW optimizer, which adapts the learning
+# rate for each parameter as the model is trained. This is done
+# applying 'weight decay' to the loss function which improves
+# the generalization of the trained model. This causes the weights
+# to converge to 0 producing a simpler (and more generalized) model.
+optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+
+
+
+
+start_time = time.time()
+print(f"DDQN RUN")
+for i_episode in range(num_episodes):
+    # Initialize the environment and get its state
+    state, info = env.reset()
+    state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    ep_reward = 0
+    for t in count():
+        action = select_action(state)
+        observation, reward, terminated, truncated, _ = env.step(action.item())
+        ep_reward += reward
+        reward = torch.tensor([reward], device=device)
+        done = terminated or truncated
+
+        if terminated:
+            next_state = None
+        else:
+            next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
+
+        if USE_PRIORITY_BUFFER:
+            indicies = memory.extend([(state, action, next_state, reward)])
+        else:
+            # Store the transition in memory
+            memory.push(state, action, next_state, reward)
+
+        # Move to the next state
+        state = next_state
+
+        # Perform one step of the optimization (on the policy network)
+        optimize_model(True)
+
+        # Soft update of the target network's weights
+        # θ′ ← τ θ + (1 −τ )θ′
+        target_net_state_dict = target_net.state_dict()
+        policy_net_state_dict = policy_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        target_net.load_state_dict(target_net_state_dict)
+
+        if done:
+            ddqn_rewards.append(ep_reward)
+            plot_rewards()
+            break
+end_time = time.time()
+total_time = end_time - start_time
+print(f'Complete in {total_time} seconds')
+
+
+
+train()
+
+train("DDQN", True)
+
 plot_rewards(show_result=True)
-plot_durations(show_result=True)
-plt.ioff
+plt.ioff()
 plt.show()
