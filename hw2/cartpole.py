@@ -28,7 +28,7 @@ BATCH_SIZE = 128
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 2500
+EPS_DECAY = 1500
 TAU = 0.005
 LR = 3e-4
 
@@ -38,7 +38,8 @@ PER_BETA0 = 0.4
 PER_EPS = 1e-5
 
 
-USE_PRIORITY_BUFFER=True
+# choose if want to use the priority replay buffer
+USE_PRIORITY_BUFFER=False
 
 #----------------------------------------------------------------PLOT BUFFERS
 
@@ -87,11 +88,9 @@ if torch.cuda.is_available():
 
 #----------------------------------------------------------------MODEL SETUP
 
+# This tuple is used to batch experiences together into a single tuple
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
-
-TD_Transition = namedtuple('Transition', 
-                           ('state', 'action', 'next_state', 'reward', 'done'))
 
 
 class ReplayMemory(object):
@@ -131,8 +130,12 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
-
+# You will see this flag throughout the implementation as it allows
+# the PER implementation and vanilla dqn/ddqn implementations coexist
 if USE_PRIORITY_BUFFER:
+    # Use the torch replay buffer which natively supports the PER sampler.
+    # uses a sum-tree to store priorities which allows for O(log n) retreival
+    # of samples.
     memory = ReplayBuffer(
             storage=ListStorage(10000),
             sampler=PrioritizedSampler(max_capacity=10000, alpha=PER_ALPHA, beta=PER_BETA0),
@@ -191,7 +194,9 @@ def select_action(state):
     random sampling increases.
     """
     global steps_done
-
+    
+    # this is the random value used to determine if explore/exploit
+    # will be chosen
     sample = random.random()
 
     # this decays the probability of selecting a random action as
@@ -211,6 +216,11 @@ def select_action(state):
 
 
 def plot_durations(show_result=False):
+    """
+    Plotter that plots the reward, since the reward for this environment
+    is just the duration the pole is upright. I failed to read this in the
+    documentation, so I have redundent plotting code
+    """
     plt.figure(1)
     dqn_durations_t = torch.tensor(dqn_episode_durations, dtype=torch.float)
     ddqn_durations_t = torch.tensor(ddqn_episode_durations, dtype=torch.float)
@@ -244,10 +254,18 @@ def optimize_model(ddqn=False):
     global memory
 
     if len(memory) < BATCH_SIZE:
+        """
+        only optimize if enough experiences are in replay buffer
+        to train on the desired batch size.
+        """
         return
 
+    # this sampled the replay buffer either from the PER buffer
+    # or randomly from the vanilla buffer
     if USE_PRIORITY_BUFFER:
         transitions, info = memory.sample(BATCH_SIZE, return_info=True)
+        # We need this to get the indicies of the experiences so we
+        # can update the sum tree with the obtained priorities
         probs, index = info.values()
         index.reshape(-1)
     else:
@@ -261,6 +279,7 @@ def optimize_model(ddqn=False):
     # (a final state would've been the one after which simulation ended)
     non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                           batch.next_state)), device=device, dtype=torch.bool)
+    # filter out non-terminal states
     non_final_next_states = torch.cat([s for s in batch.next_state
                                                 if s is not None])
     state_batch = torch.cat(batch.state)
@@ -298,6 +317,8 @@ def optimize_model(ddqn=False):
 
 
     if USE_PRIORITY_BUFFER:
+        # this is the juice of PER. We compute the importance of each sample 
+        # and floor it to a near-zero but not zero value
         probs_tensor = torch.as_tensor(probs, dtype=torch.float32, device=device)
         N = len(memory)
         per_beta = min(1.0, per_beta + 1e-5)
@@ -305,7 +326,7 @@ def optimize_model(ddqn=False):
         importance_sampling = importance_sampling / importance_sampling.max().clamp_min(1e-12)
         loss = (importance_sampling * loss).mean()
 
-        # Optimize the model
+    # Optimize the model
     optimizer.zero_grad()
     loss.backward()
     # In-place gradient clipping
@@ -313,11 +334,17 @@ def optimize_model(ddqn=False):
     optimizer.step()
 
     if USE_PRIORITY_BUFFER:
+        # this is where the TD-error is actually computed and stored 
+        # in the sum-tree
         new_prios = (td_error.abs() + PER_EPS).pow(PER_ALPHA)
         memory.update_priority(index.reshape(-1), new_prios.reshape(-1))
 
 
 def plot_rewards(show_result=False):
+    """
+    This is basically the same exact thing as the
+    plot_durations function
+    """
     plt.figure(2)
     dqn_plot = torch.tensor(dqn_rewards, dtype=torch.float)
     ddqn_plot = torch.tensor(ddqn_rewards, dtype=torch.float)
@@ -343,13 +370,6 @@ def plot_rewards(show_result=False):
             display.clear_output(wait=True)
         else:
             display.display(plt.gcf())
-
-def train(title_name="DQN", ddqn=False):
-    global steps_done 
-    global memory
-    global env
-
-
 
 
 #----------------------------------------------------------------TRAINING LOOP
@@ -392,7 +412,7 @@ optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
 start_time = time.time()
 print(f"DQN RUN")
 for i_episode in range(num_episodes):
-    # Initialize the environment and get its state
+    # initialize the environment and get its state
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
     ep_reward = 0
@@ -414,14 +434,13 @@ for i_episode in range(num_episodes):
             # Store the transition in memory
             memory.push(state, action, next_state, reward)
 
-        # Move to the next state
+        # move to the next state
         state = next_state
 
-        # Perform one step of the optimization (on the policy network)
+        # perform one step of the optimization (on the policy network)
         optimize_model()
 
-        # Soft update of the target network's weights
-        # θ′ ← τ θ + (1 −τ )θ′
+        # soft update of the target network's weights
         target_net_state_dict = target_net.state_dict()
         policy_net_state_dict = policy_net.state_dict()
         for key in policy_net_state_dict:
@@ -472,13 +491,20 @@ target_net.load_state_dict(policy_net.state_dict())
 # to converge to 0 producing a simpler (and more generalized) model.
 optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
 
-
+if USE_PRIORITY_BUFFER:
+    memory = ReplayBuffer(
+        storage=ListStorage(10000),
+        sampler=PrioritizedSampler(max_capacity=10000, alpha=PER_ALPHA, beta=PER_BETA0),
+        collate_fn=lambda x: x,
+    )
+else:
+    memory = ReplayMemory(10000)
 
 
 start_time = time.time()
 print(f"DDQN RUN")
 for i_episode in range(num_episodes):
-    # Initialize the environment and get its state
+    # initialize the environment and get its state
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
     ep_reward = 0
@@ -497,17 +523,16 @@ for i_episode in range(num_episodes):
         if USE_PRIORITY_BUFFER:
             indicies = memory.extend([(state, action, next_state, reward)])
         else:
-            # Store the transition in memory
+            # store the transition in memory
             memory.push(state, action, next_state, reward)
 
-        # Move to the next state
+        # move to the next state
         state = next_state
 
-        # Perform one step of the optimization (on the policy network)
+        # perform one step of the optimization (on the policy network)
         optimize_model(True)
 
-        # Soft update of the target network's weights
-        # θ′ ← τ θ + (1 −τ )θ′
+        # soft update of the target network's weights
         target_net_state_dict = target_net.state_dict()
         policy_net_state_dict = policy_net.state_dict()
         for key in policy_net_state_dict:
@@ -523,10 +548,6 @@ total_time = end_time - start_time
 print(f'Complete in {total_time} seconds')
 
 
-
-train()
-
-train("DDQN", True)
 
 plot_rewards(show_result=True)
 plt.ioff()
